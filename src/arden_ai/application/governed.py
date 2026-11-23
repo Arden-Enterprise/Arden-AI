@@ -9,18 +9,27 @@ from arden_ai.contracts.governed import (
     RetrievalRequest,
     RetrievalResponse,
 )
+from arden_ai.contracts.usage import ProviderUsageEvent, UsageOperation
 from arden_ai.domain.quotations import recover_source_quote
 
 
 class GovernedRetriever(Protocol):
     async def retrieve(
         self, request: RetrievalRequest, query: str
-    ) -> tuple[list[Evidence], str]: ...
+    ) -> tuple[list[Evidence], str, list[ProviderUsageEvent]]: ...
 
 
 class GovernedGenerator(Protocol):
-    async def contextualize(self, query: str, history: list[DialogueTurn]) -> str: ...
-    async def generate_grounded(self, request: GenerationRequest) -> GenerationResponse: ...
+    async def contextualize(
+        self,
+        query: str,
+        history: list[DialogueTurn],
+        request_id: str,
+        operation: UsageOperation,
+    ) -> tuple[str, ProviderUsageEvent]: ...
+    async def generate_grounded(
+        self, request: GenerationRequest, attempt: int
+    ) -> GenerationResponse: ...
 
 
 class GovernedAnswerer:
@@ -31,14 +40,26 @@ class GovernedAnswerer:
         self._generator = generator
 
     async def retrieve(self, request: RetrievalRequest) -> RetrievalResponse:
-        query = (
-            await self._generator.contextualize(request.query, request.history)
-            if request.history
-            else request.query
+        operation: UsageOperation = (
+            "READER_QUESTION_RETRIEVAL"
+            if request.purpose == "READER_QUESTION"
+            else "CHAT_RETRIEVAL"
         )
+        usage_events: list[ProviderUsageEvent] = []
+        if request.history:
+            query, context_event = await self._generator.contextualize(
+                request.query,
+                request.history,
+                str(request.request_id),
+                operation,
+            )
+            usage_events.append(context_event)
+        else:
+            query = request.query
         if not query.strip() or len(query) > 4_000:
             raise ValueError("invalid standalone question")
-        evidence, mode = await self._retriever.retrieve(request, query)
+        evidence, mode, retrieval_events = await self._retriever.retrieve(request, query)
+        usage_events.extend(retrieval_events)
         if len({chunk.chunk_id for chunk in evidence}) != len(evidence):
             raise ValueError("duplicate retrieved identities")
         if any(chunk.generation_id not in request.allowed_generation_ids for chunk in evidence):
@@ -49,6 +70,8 @@ class GovernedAnswerer:
                 "standaloneQuery": query,
                 "retrievalMode": mode,
                 "evidence": [chunk.model_dump(by_alias=True) for chunk in evidence],
+                "usageContractVersion": 1,
+                "usageEvents": [event.model_dump(by_alias=True) for event in usage_events],
             }
         )
 
@@ -58,9 +81,11 @@ class GovernedAnswerer:
         expected = {chunk.chunk_id for chunk in request.evidence}
         by_id = {chunk.chunk_id: chunk for chunk in request.evidence}
         # One bounded repair attempt, always the identical Core-authorized input set.
+        usage_events: list[ProviderUsageEvent] = []
         for attempt in range(2):
             try:
-                response = await self._generator.generate_grounded(request)
+                response = await self._generator.generate_grounded(request, attempt)
+                usage_events.extend(response.usage_events)
                 if (
                     response.request_id != request.request_id
                     or set(response.used_evidence) != expected
@@ -78,7 +103,12 @@ class GovernedAnswerer:
                 # Revalidate the original schema/bounds after raw-span recovery.
                 # Core still receives a literal source quote, not normalized text.
                 return GenerationResponse.model_validate(
-                    {**response.model_dump(by_alias=True), "citations": citations}
+                    {
+                        **response.model_dump(by_alias=True),
+                        "citations": citations,
+                        "usageContractVersion": 1,
+                        "usageEvents": [event.model_dump(by_alias=True) for event in usage_events],
+                    }
                 )
             except (ValueError, KeyError):
                 if attempt:

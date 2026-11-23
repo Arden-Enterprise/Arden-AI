@@ -13,7 +13,6 @@ from langchain_core.documents import Document
 from pydantic import SecretStr
 
 from arden_ai.application.governed import GovernedAnswerer
-from arden_ai.contracts import AnswerRequest
 from arden_ai.contracts.governed import (
     DialogueTurn,
     Evidence,
@@ -22,6 +21,7 @@ from arden_ai.contracts.governed import (
     RetrievalRequest,
     RetrievalResponse,
 )
+from arden_ai.contracts.usage import UsageOperation, make_usage_event
 from arden_ai.domain.hybrid import bm25_rank, lexical_tokens, reciprocal_rank_fusion
 from arden_ai.infrastructure.hybrid import HybridRetriever, source_evidence
 from arden_ai.presentation.api import create_api
@@ -68,15 +68,15 @@ def document(text: str = "MFA is required.", identity: str = "a" * 64) -> Docume
 class Search:
     dense: list[Document] | Exception = field(default_factory=lambda: [document()])
     lexical: list[Document] | Exception = field(default_factory=lambda: [document()])
-    calls: list[tuple[str, AnswerRequest, int]] = field(default_factory=list)
+    calls: list[tuple[str, RetrievalRequest, int]] = field(default_factory=list)
 
-    async def search_documents(self, value: AnswerRequest, limit: int) -> list[Document]:
+    async def search_documents(self, value: RetrievalRequest, limit: int) -> list[Document]:
         self.calls.append(("dense", value, limit))
         if isinstance(self.dense, Exception):
             raise self.dense
         return self.dense
 
-    async def permitted_documents(self, value: AnswerRequest, limit: int) -> list[Document]:
+    async def permitted_documents(self, value: RetrievalRequest, limit: int) -> list[Document]:
         self.calls.append(("lexical", value, limit))
         if isinstance(self.lexical, Exception):
             raise self.lexical
@@ -91,11 +91,21 @@ class Generator:
     network_error: bool = False
     insufficient: bool = False
 
-    async def contextualize(self, query: str, history: list[DialogueTurn]) -> str:
+    async def contextualize(
+        self, query: str, history: list[DialogueTurn], request_id: str, operation: UsageOperation
+    ):
         self.rewrites.append((query, history))
-        return "NS-IT-001 MFA exceptions"
+        return "NS-IT-001 MFA exceptions", make_usage_event(
+            operation,
+            "gpt-6-luna",
+            1,
+            {"input_tokens": 1, "output_tokens": 1},
+            event_key=f"{request_id}:{operation}:contextualize",
+        )
 
-    async def generate_grounded(self, value: GenerationRequest) -> GenerationResponse:
+    async def generate_grounded(
+        self, value: GenerationRequest, attempt: int = 0
+    ) -> GenerationResponse:
         self.calls.append(value)
         if self.network_error:
             raise ConnectionError("unavailable")
@@ -109,6 +119,8 @@ class Generator:
                 if self.insufficient
                 else [{"chunkId": value.evidence[0].chunk_id, "quote": quote}],
                 "usedEvidence": [chunk.chunk_id for chunk in value.evidence],
+                "usageContractVersion": 1,
+                "usageEvents": [],
             }
         )
 
@@ -151,7 +163,7 @@ def test_shared_core_python_v2_golden_contract() -> None:
 
 def test_both_branches_receive_the_same_core_scope_and_raw_text_is_recovered() -> None:
     search = Search()
-    found, mode = asyncio.run(HybridRetriever(search).retrieve(request(), "MFA"))
+    found, mode, _events = asyncio.run(HybridRetriever(search).retrieve(request(), "MFA"))
     assert mode == "HYBRID"
     assert len(found) == 1 and found[0].content == "MFA is required."
     assert found[0].label.startswith("NS-IT-001")
@@ -165,7 +177,7 @@ def test_both_branches_receive_the_same_core_scope_and_raw_text_is_recovered() -
 def test_single_network_failure_reports_honest_filtered_degradation(branch: str, mode: str) -> None:
     search = Search()
     setattr(search, branch, ConnectionError("unavailable"))
-    found, actual = asyncio.run(HybridRetriever(search).retrieve(request(), "MFA"))
+    found, actual, _events = asyncio.run(HybridRetriever(search).retrieve(request(), "MFA"))
     assert actual == mode and len(found) == 1
 
 

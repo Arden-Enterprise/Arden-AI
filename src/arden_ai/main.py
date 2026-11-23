@@ -2,6 +2,7 @@ from fastapi import FastAPI
 
 from arden_ai.application import GenerationIndexer, PermissionAwareAnswerer
 from arden_ai.application.governed import GovernedAnswerer
+from arden_ai.application.maintenance import MaintenanceAnalyzer
 from arden_ai.application.reader_summary import ReaderSummarizer
 from arden_ai.infrastructure import (
     ChromaCandidateGenerationStore,
@@ -11,6 +12,7 @@ from arden_ai.infrastructure import (
     get_settings,
 )
 from arden_ai.infrastructure.hybrid import HybridRetriever
+from arden_ai.infrastructure.maintenance import OpenAIMaintenanceAnalyzer
 from arden_ai.infrastructure.reader_summary import OpenAISummaryGenerator
 from arden_ai.presentation import create_api
 
@@ -22,6 +24,7 @@ def create_app(
     answerer: PermissionAwareAnswerer | None = None,
     governed: GovernedAnswerer | None = None,
     summaries: ReaderSummarizer | None = None,
+    maintenance_analyzer: MaintenanceAnalyzer | None = None,
 ) -> FastAPI:
     """Compose infrastructure with the HTTP presentation layer."""
     service_settings = settings or get_settings()
@@ -32,6 +35,8 @@ def create_app(
         answerer=answerer,
         governed=governed,
         summaries=summaries,
+        maintenance_analyzer=maintenance_analyzer,
+        maintenance_analyzer_factory=lambda: OpenAIMaintenanceAnalyzer(service_settings),
         summaries_factory=lambda: ReaderSummarizer(OpenAISummaryGenerator(service_settings)),
         governed_factory=lambda: GovernedAnswerer(
             HybridRetriever(ChromaPermissionAwareRetriever(service_settings)),

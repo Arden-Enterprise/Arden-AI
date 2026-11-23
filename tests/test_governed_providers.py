@@ -34,9 +34,10 @@ def test_actual_chroma_filters_dense_and_lexical_before_ranking(monkeypatch, pur
         adapter = answering.ChromaPermissionAwareRetriever(
             Settings(openai_api_key=SecretStr("test-only"))
         )
-        found, mode = asyncio.run(
+        found, mode, usage_events = asyncio.run(
             HybridRetriever(adapter).retrieve(request(purpose=purpose), "MFA")
         )
+        assert len(usage_events) == 1
         assert mode == "HYBRID" and [chunk.chunk_id for chunk in found] == ["a" * 64]
         assert found[0].generation_id == GEN
         # Both API methods execute actual vendor filters, including lexical get().
@@ -49,7 +50,7 @@ def test_actual_chroma_filters_dense_and_lexical_before_ranking(monkeypatch, pur
             }
         )
         assert len(asyncio.run(adapter.permitted_documents(dense_request, 100))) == 1
-        assert len(asyncio.run(adapter.search_documents(dense_request, 24))) == 1
+        assert len(asyncio.run(adapter.search_documents(dense_request, 24))[0]) == 1
     finally:
         client.delete_collection(name)
 
@@ -63,18 +64,25 @@ def test_provider_disables_hosted_state_and_resolves_temporary_citation_ids(monk
             options.update(kwargs)
 
         def with_structured_output(self, schema, **kwargs):  # type: ignore[no-untyped-def]
-            assert kwargs == {"method": "json_schema", "strict": True}
+            assert kwargs == {"method": "json_schema", "strict": True, "include_raw": True}
 
             class Runnable:
                 async def ainvoke(self, messages):  # type: ignore[no-untyped-def]
                     captured.extend(messages)
-                    return schema.model_validate(
+                    parsed = schema.model_validate(
                         {
                             "status": "ANSWERED",
                             "answer": "MFA is required.",
                             "citations": [{"evidence_id": "E1", "quote": "MFA is required."}],
                         }
                     )
+                    return {
+                        "raw": type(
+                            "Raw", (), {"usage_metadata": {"input_tokens": 1, "output_tokens": 1}}
+                        )(),
+                        "parsed": parsed,
+                        "parsing_error": None,
+                    }
 
             return Runnable()
 

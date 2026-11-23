@@ -142,6 +142,20 @@
           ],
           "title": "Status",
           "type": "string"
+        },
+        "usageContractVersion": {
+          "const": 1,
+          "default": 1,
+          "title": "Usagecontractversion",
+          "type": "integer"
+        },
+        "usageEvents": {
+          "items": {
+            "$ref": "#/$defs/ProviderUsageEvent"
+          },
+          "maxItems": 64,
+          "title": "Usageevents",
+          "type": "array"
         }
       },
       "required": [
@@ -151,6 +165,94 @@
         "citations"
       ],
       "title": "AnswerResponse",
+      "type": "object"
+    },
+    "ProviderUsageEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "eventId": {
+          "format": "uuid",
+          "title": "Eventid",
+          "type": "string"
+        },
+        "inputTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Inputtokens"
+        },
+        "latencyMs": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Latencyms"
+        },
+        "model": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "operation": {
+          "enum": [
+            "CHAT_RETRIEVAL",
+            "CHAT_GENERATION",
+            "READER_QUESTION_RETRIEVAL",
+            "READER_QUESTION_GENERATION",
+            "READER_SUMMARY",
+            "INDEX_EMBEDDING",
+            "MAINTENANCE_ANALYSIS"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "outputTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Outputtokens"
+        },
+        "provider": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[A-Z0-9_-]+$",
+          "title": "Provider",
+          "type": "string"
+        },
+        "usageComplete": {
+          "title": "Usagecomplete",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "eventId",
+        "operation",
+        "provider",
+        "model",
+        "inputTokens",
+        "outputTokens",
+        "latencyMs",
+        "usageComplete"
+      ],
+      "title": "ProviderUsageEvent",
       "type": "object"
     }
   },

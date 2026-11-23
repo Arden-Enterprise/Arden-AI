@@ -13,6 +13,11 @@ context assembly, answer generation and Langfuse telemetry. The Arden core API r
 source of truth for identity, organization membership, AccessPolicy, review state, chat history
 and atomic publication activation. ChromaDB is a retrieval index, never an authorization source.
 
+Flow 4 maintenance analysis uses the authenticated, versioned `/v2/maintenance-analyses` contract.
+Source text is request-only; the response carries bounded findings with exact source quotes and
+content-free provider usage metadata. The exported contract is
+[`maintenance-analysis-v2.schema.json`](schemas/maintenance-analysis-v2.schema.json).
+
 ## Local development
 
 The project targets Python 3.11 and uses `uv` for dependency and environment management.

@@ -25,7 +25,9 @@ class QuotedGenerator:
     async def contextualize(self, query: str, history: list[DialogueTurn]) -> str:
         return query
 
-    async def generate_grounded(self, value: GenerationRequest) -> GenerationResponse:
+    async def generate_grounded(
+        self, value: GenerationRequest, attempt: int = 0
+    ) -> GenerationResponse:
         self.calls.append(value)
         response = GenerationResponse.model_validate(
             {
@@ -34,6 +36,8 @@ class QuotedGenerator:
                 "answer": "Supported answer.",
                 "citations": [{"chunkId": value.evidence[0].chunk_id, "quote": self.quote}],
                 "usedEvidence": [chunk.chunk_id for chunk in value.evidence],
+                "usageContractVersion": 1,
+                "usageEvents": [],
                 **self.changes,
             }
         )

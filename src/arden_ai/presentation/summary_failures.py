@@ -7,7 +7,11 @@ from pydantic import ValidationError
 from arden_ai.application.reader_summary import InvalidSummary
 
 SummaryFailure = Literal[
-    "TIMEOUT", "PROVIDER_BUSY", "PROVIDER_AUTH", "INVALID_OUTPUT", "UNAVAILABLE",
+    "TIMEOUT",
+    "PROVIDER_BUSY",
+    "PROVIDER_AUTH",
+    "INVALID_OUTPUT",
+    "UNAVAILABLE",
 ]
 
 

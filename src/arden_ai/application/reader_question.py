@@ -24,11 +24,17 @@ class UnsupportedReaderQuestion(ValueError):
 
 
 def reader_question_payload(request: GenerationRequest) -> str:
-    payload = json.dumps({
-        "question": request.query,
-        "evidence": [{"id": f"E{i}", "source": chunk.label, "text": chunk.content}
-                     for i, chunk in enumerate(request.evidence, 1)],
-    }, ensure_ascii=False, separators=(",", ":"))
+    payload = json.dumps(
+        {
+            "question": request.query,
+            "evidence": [
+                {"id": f"E{i}", "source": chunk.label, "text": chunk.content}
+                for i, chunk in enumerate(request.evidence, 1)
+            ],
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
     encoding = tiktoken.get_encoding("o200k_base")
     count = len(encoding.encode(READER_QUESTION_PROMPT + payload, disallowed_special=()))
     if count + 2_000 > 12_000:

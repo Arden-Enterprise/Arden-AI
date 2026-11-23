@@ -1,0 +1,239 @@
+{
+  "$defs": {
+    "MaintenanceAnalysisRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "caseId": {
+          "format": "uuid",
+          "title": "Caseid",
+          "type": "string"
+        },
+        "contractVersion": {
+          "const": 2,
+          "default": 2,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "requestId": {
+          "format": "uuid",
+          "title": "Requestid",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/MaintenanceSource"
+          },
+          "maxItems": 4,
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "requestId",
+        "caseId",
+        "sources"
+      ],
+      "title": "MaintenanceAnalysisRequest",
+      "type": "object"
+    },
+    "MaintenanceAnalysisResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": 2,
+          "default": 2,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/MaintenanceFinding"
+          },
+          "maxItems": 4,
+          "minItems": 1,
+          "title": "Findings",
+          "type": "array"
+        },
+        "state": {
+          "const": "succeeded",
+          "title": "State",
+          "type": "string"
+        },
+        "usageContractVersion": {
+          "const": 1,
+          "title": "Usagecontractversion",
+          "type": "integer"
+        },
+        "usageEvents": {
+          "items": {
+            "$ref": "#/$defs/ProviderUsageEvent"
+          },
+          "maxItems": 1,
+          "title": "Usageevents",
+          "type": "array"
+        }
+      },
+      "required": [
+        "state",
+        "findings",
+        "usageContractVersion",
+        "usageEvents"
+      ],
+      "title": "MaintenanceAnalysisResponse",
+      "type": "object"
+    },
+    "MaintenanceFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "quote": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Quote",
+          "type": "string"
+        },
+        "summary": {
+          "maxLength": 350,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "textHash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Texthash",
+          "type": "string"
+        },
+        "versionId": {
+          "format": "uuid",
+          "title": "Versionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "versionId",
+        "summary",
+        "textHash",
+        "quote"
+      ],
+      "title": "MaintenanceFinding",
+      "type": "object"
+    },
+    "MaintenanceSource": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "textHash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Texthash",
+          "type": "string"
+        },
+        "versionId": {
+          "format": "uuid",
+          "title": "Versionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "versionId",
+        "text",
+        "textHash"
+      ],
+      "title": "MaintenanceSource",
+      "type": "object"
+    },
+    "ProviderUsageEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "eventId": {
+          "format": "uuid",
+          "title": "Eventid",
+          "type": "string"
+        },
+        "inputTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Inputtokens"
+        },
+        "latencyMs": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Latencyms"
+        },
+        "model": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "operation": {
+          "enum": [
+            "CHAT_RETRIEVAL",
+            "CHAT_GENERATION",
+            "READER_QUESTION_RETRIEVAL",
+            "READER_QUESTION_GENERATION",
+            "READER_SUMMARY",
+            "INDEX_EMBEDDING",
+            "MAINTENANCE_ANALYSIS"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "outputTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Outputtokens"
+        },
+        "provider": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[A-Z0-9_-]+$",
+          "title": "Provider",
+          "type": "string"
+        },
+        "usageComplete": {
+          "title": "Usagecomplete",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "eventId",
+        "operation",
+        "provider",
+        "model",
+        "inputTokens",
+        "outputTokens",
+        "latencyMs",
+        "usageComplete"
+      ],
+      "title": "ProviderUsageEvent",
+      "type": "object"
+    }
+  },
+  "title": "Arden Flow 4 maintenance analysis contract v2"
+}

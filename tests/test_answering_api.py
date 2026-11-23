@@ -8,7 +8,18 @@ from arden_ai.main import create_app
 
 class EmptyRetriever:
     async def retrieve(self, request: AnswerRequest, limit: int):  # type: ignore[no-untyped-def]
-        return ()
+        from arden_ai.contracts.usage import ProviderUsageEvent
+
+        return (), ProviderUsageEvent(
+            eventId="10000000-0000-4000-8000-000000000004",
+            operation="CHAT_RETRIEVAL",
+            provider="OPENAI",
+            model="text-embedding-3-small",
+            inputTokens=0,
+            outputTokens=0,
+            latencyMs=1,
+            usageComplete=True,
+        )
 
 
 class UnusedGenerator:

@@ -3,7 +3,9 @@ from uuid import UUID
 
 from pydantic import Field, model_validator
 
-from arden_ai.contracts.indexing import CONTRACT_VERSION, ContractModel, Sha256
+from arden_ai.contracts.base import ContractModel
+from arden_ai.contracts.indexing import CONTRACT_VERSION, Sha256
+from arden_ai.contracts.usage import ProviderUsageEvent
 
 
 class AnswerRequest(ContractModel):
@@ -32,10 +34,14 @@ class AnswerCitation(ContractModel):
 
 class AnswerResponse(ContractModel):
     contract_version: Literal[1] = Field(default=CONTRACT_VERSION, frozen=True)
+    usage_contract_version: Literal[1] = Field(default=1, frozen=True)
     request_id: UUID
     status: Literal["ANSWERED", "INSUFFICIENT_EVIDENCE"]
     answer: Annotated[str, Field(min_length=1, max_length=12_000)]
     citations: Annotated[list[AnswerCitation], Field(max_length=12)]
+    usage_events: Annotated[list[ProviderUsageEvent], Field(max_length=64)] = Field(
+        default_factory=list
+    )
 
     @model_validator(mode="after")
     def validate_answer(self) -> "AnswerResponse":

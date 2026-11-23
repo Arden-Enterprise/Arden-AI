@@ -7,8 +7,8 @@ from uuid import UUID
 
 from langchain_core.documents import Document
 
-from arden_ai.contracts import AnswerRequest
 from arden_ai.contracts.governed import Evidence, RetrievalRequest
+from arden_ai.contracts.usage import ProviderUsageEvent
 from arden_ai.domain.hybrid import bm25_rank, reciprocal_rank_fusion
 
 logger = logging.getLogger(__name__)
@@ -69,8 +69,12 @@ def bounded_context(ranking: list[str], by_id: dict[str, Evidence]) -> list[Evid
 
 
 class DocumentSearch(Protocol):
-    async def search_documents(self, request: AnswerRequest, limit: int) -> list[Document]: ...
-    async def permitted_documents(self, request: AnswerRequest, limit: int) -> list[Document]: ...
+    async def search_documents(
+        self, request: RetrievalRequest, limit: int
+    ) -> tuple[list[Document], ProviderUsageEvent]: ...
+    async def permitted_documents(
+        self, request: RetrievalRequest, limit: int
+    ) -> list[Document]: ...
 
 
 def source_evidence(document: Document, request: RetrievalRequest) -> Evidence:
@@ -113,16 +117,11 @@ class HybridRetriever:
     def __init__(self, search: DocumentSearch) -> None:
         self._search = search
 
-    async def retrieve(self, request: RetrievalRequest, query: str) -> tuple[list[Evidence], str]:
+    async def retrieve(
+        self, request: RetrievalRequest, query: str
+    ) -> tuple[list[Evidence], str, list[ProviderUsageEvent]]:
         started = time.monotonic()
-        search_request = AnswerRequest.model_validate(
-            {
-                "requestId": str(request.request_id),
-                "organizationId": str(request.organization_id),
-                "query": query,
-                "allowedGenerationIds": [str(value) for value in request.allowed_generation_ids],
-            }
-        )
+        search_request = request.model_copy(update={"query": query})
         dense, lexical = await asyncio.gather(
             self._search.search_documents(search_request, 24),
             self._search.permitted_documents(search_request, MAX_LEXICAL_CHUNKS + 1),
@@ -141,11 +140,19 @@ class HybridRetriever:
             > MAX_LEXICAL_CHARACTERS
         ):
             raise ValueError("authorized lexical corpus exceeds its bounded search budget")
-        dense_evidence = (
-            []
-            if isinstance(dense, BaseException)
-            else [source_evidence(document, request) for document in dense]
-        )
+        dense_documents: list[Document] = []
+        usage_events: list[ProviderUsageEvent] = []
+        if not isinstance(dense, BaseException):
+            if (
+                isinstance(dense, tuple)
+                and len(dense) == 2
+                and isinstance(dense[1], ProviderUsageEvent)
+            ):
+                dense_documents, usage = dense
+                usage_events.append(usage)
+            else:
+                dense_documents = dense
+        dense_evidence = [source_evidence(document, request) for document in dense_documents]
         lexical_evidence = [source_evidence(document, request) for document in lexical_documents]
         by_id: dict[str, Evidence] = {}
         for chunk in [*lexical_evidence, *dense_evidence]:
@@ -179,4 +186,4 @@ class HybridRetriever:
                 "duration_ms": round((time.monotonic() - started) * 1000),
             },
         )
-        return selected, mode
+        return selected, mode, usage_events

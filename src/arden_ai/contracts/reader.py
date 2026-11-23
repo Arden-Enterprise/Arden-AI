@@ -7,9 +7,9 @@ from uuid import UUID
 
 from pydantic import Field, model_validator
 
+from arden_ai.contracts.base import ContractModel
 from arden_ai.contracts.indexing import (
     ChunkManifestEntry,
-    ContractModel,
     IndexGenerationRequest,
     Sha256,
 )

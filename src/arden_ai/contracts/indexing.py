@@ -4,26 +4,14 @@ import hashlib
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
+from arden_ai.contracts.base import ContractModel
+from arden_ai.contracts.usage import ProviderUsageEvent
 from arden_ai.domain.semantic_document import SemanticDocument, parse_semantic_document
 
 CONTRACT_VERSION: Literal[1] = 1
 Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
-
-
-def _to_camel(value: str) -> str:
-    first, *rest = value.split("_")
-    return first + "".join(part.capitalize() for part in rest)
-
-
-class ContractModel(BaseModel):
-    model_config = ConfigDict(
-        alias_generator=_to_camel,
-        validate_by_alias=True,
-        validate_by_name=False,
-        extra="forbid",
-    )
 
 
 class IndexGenerationRequest(ContractModel):
@@ -93,6 +81,7 @@ class ChunkManifestEntry(ContractModel):
 
 class IndexGenerationManifest(ContractModel):
     contract_version: Literal[1] = Field(default=CONTRACT_VERSION, frozen=True)
+    usage_contract_version: Literal[1] = Field(frozen=True)
     job_id: UUID
     generation_id: UUID
     snapshot_version_id: UUID
@@ -104,4 +93,4 @@ class IndexGenerationManifest(ContractModel):
     markdown_content_hash: Sha256
     chunks_digest: Sha256
     chunks: Annotated[list[ChunkManifestEntry], Field(min_length=1)]
-
+    usage_events: Annotated[list[ProviderUsageEvent], Field(max_length=32)]

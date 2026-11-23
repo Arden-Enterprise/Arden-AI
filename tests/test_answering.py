@@ -8,6 +8,7 @@ from arden_ai.application import (
     RetrievedChunk,
 )
 from arden_ai.contracts import AnswerRequest
+from arden_ai.contracts.usage import ProviderUsageEvent
 
 ORGANIZATION_ID = UUID("10000000-0000-4000-8000-000000000001")
 GENERATION_ID = UUID("10000000-0000-4000-8000-000000000002")
@@ -31,10 +32,19 @@ class FakeRetriever:
 
     async def retrieve(
         self, request: AnswerRequest, limit: int
-    ) -> tuple[RetrievedChunk, ...]:
+    ) -> tuple[tuple[RetrievedChunk, ...], ProviderUsageEvent]:
         assert request.allowed_generation_ids == [GENERATION_ID]
         assert limit == 8
-        return self.chunks
+        return self.chunks, ProviderUsageEvent(
+            eventId="10000000-0000-4000-8000-000000000005",
+            operation="CHAT_RETRIEVAL",
+            provider="OPENAI",
+            model="text-embedding-3-small",
+            inputTokens=4,
+            outputTokens=0,
+            latencyMs=3,
+            usageComplete=True,
+        )
 
 
 @dataclass
@@ -42,7 +52,7 @@ class FakeGenerator:
     result: GeneratedAnswer
 
     async def generate(
-        self, query: str, evidence: tuple[RetrievedChunk, ...]
+        self, query: str, evidence: tuple[RetrievedChunk, ...], request_id: UUID
     ) -> GeneratedAnswer:
         assert query == "How is MFA used?"
         assert evidence

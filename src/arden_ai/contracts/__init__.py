@@ -5,6 +5,7 @@ from arden_ai.contracts.indexing import (
     IndexGenerationManifest,
     IndexGenerationRequest,
 )
+from arden_ai.contracts.usage import ProviderUsageEvent
 
 __all__ = [
     "CONTRACT_VERSION",
@@ -14,5 +15,5 @@ __all__ = [
     "ChunkManifestEntry",
     "IndexGenerationManifest",
     "IndexGenerationRequest",
+    "ProviderUsageEvent",
 ]
-

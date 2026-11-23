@@ -4,7 +4,9 @@ from uuid import UUID
 
 from pydantic import Field, model_validator
 
-from arden_ai.contracts.indexing import ContractModel, Sha256
+from arden_ai.contracts.base import ContractModel
+from arden_ai.contracts.indexing import Sha256
+from arden_ai.contracts.usage import ProviderUsageEvent
 
 
 class DialogueTurn(ContractModel):
@@ -74,10 +76,12 @@ class Evidence(ContractModel):
 
 class RetrievalResponse(ContractModel):
     contract_version: Literal[2] = 2
+    usage_contract_version: Literal[1]
     request_id: UUID
     standalone_query: Annotated[str, Field(min_length=1, max_length=4_000)]
     retrieval_mode: Literal["HYBRID", "SEMANTIC", "LEXICAL"]
     evidence: Annotated[list[Evidence], Field(max_length=8)]
+    usage_events: Annotated[list[ProviderUsageEvent], Field(max_length=64)]
 
 
 class GenerationRequest(ContractModel):
@@ -98,9 +102,15 @@ class GenerationRequest(ContractModel):
         if sum(len(turn.question) + len(turn.answer) for turn in self.history) > 24_000:
             raise ValueError("history exceeds generation budget")
         if self.purpose == "READER_QUESTION" and (
-            self.history or not self.query.strip()
-            or len({(chunk.generation_id, chunk.snapshot_version_id, chunk.snapshot_content_hash)
-                    for chunk in self.evidence}) != 1
+            self.history
+            or not self.query.strip()
+            or len(
+                {
+                    (chunk.generation_id, chunk.snapshot_version_id, chunk.snapshot_content_hash)
+                    for chunk in self.evidence
+                }
+            )
+            != 1
         ):
             raise ValueError("reader generation requires one exact immutable source and no history")
         return self
@@ -113,11 +123,13 @@ class EvidenceCitation(ContractModel):
 
 class GenerationResponse(ContractModel):
     contract_version: Literal[2] = 2
+    usage_contract_version: Literal[1]
     request_id: UUID
     status: Literal["ANSWERED", "INSUFFICIENT_EVIDENCE"]
     answer: Annotated[str, Field(min_length=1, max_length=12_000)]
     citations: Annotated[list[EvidenceCitation], Field(max_length=12)]
     used_evidence: Annotated[list[Sha256], Field(min_length=1, max_length=8)]
+    usage_events: Annotated[list[ProviderUsageEvent], Field(max_length=64)]
 
     @model_validator(mode="after")
     def validate_status(self) -> "GenerationResponse":

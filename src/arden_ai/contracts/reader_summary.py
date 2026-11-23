@@ -5,7 +5,9 @@ from uuid import UUID
 
 from pydantic import Field
 
-from arden_ai.contracts.indexing import ContractModel, Sha256
+from arden_ai.contracts.base import ContractModel
+from arden_ai.contracts.indexing import Sha256
+from arden_ai.contracts.usage import ProviderUsageEvent
 
 PointKind = Literal["KEY_POINT", "STEP", "CONDITION", "EXCEPTION"]
 
@@ -28,6 +30,7 @@ class SummaryRange(ContractModel):
 
 class ReaderSummaryResponse(ContractModel):
     contract_version: Literal[1] = 1
+    usage_contract_version: Literal[1]
     purpose: Literal["READER_SUMMARY"]
     request_id: UUID
     organization_id: UUID
@@ -41,3 +44,4 @@ class ReaderSummaryResponse(ContractModel):
     coverage: Annotated[list[SummaryRange], Field(min_length=1, max_length=8)]
     used_chunk_ids: Annotated[list[str], Field(min_length=1, max_length=256)]
     points: Annotated[list[SummaryPoint], Field(min_length=1, max_length=24)]
+    usage_events: Annotated[list[ProviderUsageEvent], Field(max_length=16)]

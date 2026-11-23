@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from arden_ai.contracts import IndexGenerationManifest, IndexGenerationRequest
+from arden_ai.contracts.usage import ProviderUsageEvent
 from arden_ai.domain.chunking import CHUNKING_VERSION, PreparedChunk, chunk_markdown
 from arden_ai.domain.compiler import CompiledMarkdown, compile_markdown
 from arden_ai.domain.pdf import compile_pdf
@@ -25,7 +26,7 @@ class CandidateGenerationStore(Protocol):
 
     async def replace_candidate(
         self, request: IndexGenerationRequest, prepared: PreparedGeneration
-    ) -> None: ...
+    ) -> list[ProviderUsageEvent] | None: ...
 
 
 def prepare_generation(request: IndexGenerationRequest) -> PreparedGeneration:
@@ -48,7 +49,7 @@ class GenerationIndexer:
 
     async def index(self, request: IndexGenerationRequest) -> IndexGenerationManifest:
         prepared = prepare_generation(request)
-        await self._store.replace_candidate(request, prepared)
+        usage_events = await self._store.replace_candidate(request, prepared) or []
 
         chunks_payload = [
             {
@@ -80,5 +81,7 @@ class GenerationIndexer:
                 "markdownContentHash": prepared.compiled.content_hash,
                 "chunksDigest": chunks_digest,
                 "chunks": chunks_payload,
+                "usageContractVersion": 1,
+                "usageEvents": [event.model_dump(by_alias=True) for event in usage_events],
             }
         )

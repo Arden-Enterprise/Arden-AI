@@ -4,7 +4,48 @@ from uuid import UUID
 
 from arden_ai.contracts import IndexGenerationRequest
 from arden_ai.contracts.export_schemas import build_schemas
+from arden_ai.contracts.usage import make_usage_event
 from arden_ai.domain import ARDEN_DOCUMENT_PREFIX
+
+
+def test_usage_event_identity_is_stable_per_request_operation_and_call_slot() -> None:
+    first = make_usage_event(
+        "CHAT_GENERATION",
+        "gpt-6-luna",
+        10,
+        event_key="10000000-0000-4000-8000-000000000001:CHAT_GENERATION:attempt:0",
+    )
+    retry = make_usage_event(
+        "CHAT_GENERATION",
+        "gpt-6-luna",
+        15,
+        event_key="10000000-0000-4000-8000-000000000001:CHAT_GENERATION:attempt:0",
+    )
+    next_attempt = make_usage_event(
+        "CHAT_GENERATION",
+        "gpt-6-luna",
+        15,
+        event_key="10000000-0000-4000-8000-000000000001:CHAT_GENERATION:attempt:1",
+    )
+    other_request = make_usage_event(
+        "CHAT_GENERATION",
+        "gpt-6-luna",
+        15,
+        event_key="10000000-0000-4000-8000-000000000002:CHAT_GENERATION:attempt:0",
+    )
+
+    assert first.event_id == retry.event_id
+    assert first.event_id != next_attempt.event_id
+    assert first.event_id != other_request.event_id
+
+
+def test_usage_event_identity_requires_a_nonempty_call_slot() -> None:
+    try:
+        make_usage_event("CHAT_GENERATION", "gpt-6-luna", 10, event_key="  ")
+    except ValueError as error:
+        assert str(error) == "usage event key is required"
+    else:
+        raise AssertionError("empty usage identity was accepted")
 
 
 def snapshot() -> str:
@@ -131,5 +172,3 @@ def test_exported_indexing_schema_contains_concrete_contracts() -> None:
 
     assert "properties" in definitions["IndexGenerationRequest"]
     assert "properties" in definitions["IndexGenerationManifest"]
-
-

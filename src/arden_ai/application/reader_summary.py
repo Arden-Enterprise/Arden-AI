@@ -2,8 +2,9 @@
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Annotated, Protocol
+from uuid import UUID
 
 import tiktoken
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -16,6 +17,7 @@ from arden_ai.contracts.reader_summary import (
     SummaryPoint,
     SummaryRange,
 )
+from arden_ai.contracts.usage import ProviderUsageEvent
 from arden_ai.domain.quotations import recover_source_quote
 
 SYSTEM_PROMPT = (
@@ -68,6 +70,9 @@ class SummaryWindow:
     end: int
     payload: str
     evidence: tuple[EvidenceSlice, ...]
+    request_id: UUID
+    index: int
+    attempt: int = 0
 
 
 class SummaryGenerator(Protocol):
@@ -93,34 +98,48 @@ def plan_summary(source: ReaderSourceResponse) -> tuple[SummaryWindow, ...]:
         while tokens(text[start:end]) > 2_000:
             end = start + max(1, (end - start) * 3 // 4)
         if end < len(text):
-            boundary = max(text.rfind("\n", start + (end - start) * 3 // 4, end),
-                           text.rfind(" ", start + (end - start) * 3 // 4, end))
+            boundary = max(
+                text.rfind("\n", start + (end - start) * 3 // 4, end),
+                text.rfind(" ", start + (end - start) * 3 // 4, end),
+            )
             if boundary >= start:
                 end = boundary + 1
         left, right = max(0, start - 256), min(len(text), end + 256)
         evidence = tuple(
-            EvidenceSlice(f"E{i}", chunk.chunk_id,
-                          text[max(left, chunk.start_offset):min(right, chunk.end_offset)],
-                          max(left, chunk.start_offset))
+            EvidenceSlice(
+                f"E{i}",
+                chunk.chunk_id,
+                text[max(left, chunk.start_offset) : min(right, chunk.end_offset)],
+                max(left, chunk.start_offset),
+            )
             for i, chunk in enumerate(source.chunks, 1)
             if chunk.start_offset < right and chunk.end_offset > left
         )
         if not evidence or not any(item.text.strip() for item in evidence):
             raise UnsupportedSummary("no citable source text")
-        payload = json.dumps({
-            "primaryStart": start, "primaryEnd": end, "contextStart": left,
-            "text": text[left:right],
-            "evidence": [{"id": item.evidence_id, "text": item.text} for item in evidence],
-        }, ensure_ascii=False, separators=(",", ":"))
+        payload = json.dumps(
+            {
+                "primaryStart": start,
+                "primaryEnd": end,
+                "contextStart": left,
+                "text": text[left:right],
+                "evidence": [{"id": item.evidence_id, "text": item.text} for item in evidence],
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
         if tokens(SYSTEM_PROMPT + payload) + 2_000 > 8_000:
             raise UnsupportedSummary("source overlap exceeds prompt budget")
-        windows.append(SummaryWindow(start, end, payload, evidence))
+        windows.append(
+            SummaryWindow(start, end, payload, evidence, source.request_id, len(windows))
+        )
         start = end
     return tuple(windows)
 
 
-def validate_window(output: object, window: SummaryWindow,
-                    source: ReaderSourceResponse) -> list[SummaryPoint]:
+def validate_window(
+    output: object, window: SummaryWindow, source: ReaderSourceResponse
+) -> list[SummaryPoint]:
     parsed = output if isinstance(output, WindowOutput) else WindowOutput.model_validate(output)
     slices = {item.evidence_id: item for item in window.evidence}
     chunks = {chunk.chunk_id: chunk for chunk in source.chunks}
@@ -140,9 +159,14 @@ def validate_window(output: object, window: SummaryWindow,
                 raise InvalidSummary("changed quotation")
             absolute = item.start + item.text.index(quote)
             primary_supported |= absolute < window.end and absolute + len(quote) > window.start
-            citations.append(SummaryCitation.model_validate({
-                "chunkId": item.chunk_id, "quote": quote,
-            }))
+            citations.append(
+                SummaryCitation.model_validate(
+                    {
+                        "chunkId": item.chunk_id,
+                        "quote": quote,
+                    }
+                )
+            )
         if not primary_supported:
             raise InvalidSummary("point cites only neighboring context")
         result.append(SummaryPoint(kind=point.kind, text=point.text, citations=citations))
@@ -162,24 +186,38 @@ class ReaderSummarizer:
         semaphore = asyncio.Semaphore(2)
         failed = asyncio.Event()
 
-        async def generate(window: SummaryWindow) -> list[SummaryPoint]:
+        async def generate(
+            window: SummaryWindow,
+        ) -> tuple[list[SummaryPoint], list[ProviderUsageEvent]]:
+            events: list[ProviderUsageEvent] = []
             for attempt in range(2):
                 try:
                     async with asyncio.timeout(45):
-                        output = await self._generator.generate(window)
+                        generated = await self._generator.generate(replace(window, attempt=attempt))
+                    if (
+                        isinstance(generated, tuple)
+                        and len(generated) == 2
+                        and isinstance(generated[1], ProviderUsageEvent)
+                    ):
+                        output, event = generated
+                        events.append(event)
+                    else:
+                        output = generated
                 except (ValidationError, InvalidSummary):
                     # Structured-output schema failure alone is eligible for output repair.
                     if attempt == 1:
                         raise InvalidSummary("invalid structured output") from None
                     continue
                 try:
-                    return validate_window(output, window, source)
+                    return validate_window(output, window, source), events
                 except (ValueError, KeyError):
                     if attempt == 1:
                         raise InvalidSummary("invalid source-cited output") from None
             raise InvalidSummary("no validated output")
 
-        async def process(window: SummaryWindow) -> list[SummaryPoint]:
+        async def process(
+            window: SummaryWindow,
+        ) -> tuple[list[SummaryPoint], list[ProviderUsageEvent]]:
             async with semaphore:
                 if failed.is_set():
                     raise InvalidSummary("another source window failed")
@@ -191,23 +229,39 @@ class ReaderSummarizer:
                     failed.set()
                     raise
 
-        tasks: list[asyncio.Task[list[SummaryPoint]]] = []
+        tasks: list[asyncio.Task[tuple[list[SummaryPoint], list[ProviderUsageEvent]]]] = []
         async with asyncio.TaskGroup() as group:
             tasks = [group.create_task(process(window)) for window in windows]
         # TaskGroup cancels and awaits siblings on failure. No partial response or rewrite.
-        points, seen = [], set()
+        points, seen, usage_events = [], set(), []
         for task in tasks:
-            for point in task.result():
+            window_points, window_events = task.result()
+            usage_events.extend(window_events)
+            for point in window_points:
                 key = point.model_dump_json(by_alias=True)
                 if key not in seen:
                     seen.add(key)
                     points.append(point)
-        identity = source.model_dump(by_alias=True, exclude={
-            "markdown", "chunks", "compiler_version", "chunking_version",
-        })
-        return ReaderSummaryResponse.model_validate({
-            **identity, "status": "COMPLETED", "points": points,
-            "coverage": [SummaryRange.model_validate({"startOffset": w.start, "endOffset": w.end})
-                         for w in windows],
-            "usedChunkIds": [chunk.chunk_id for chunk in source.chunks],
-        })
+        identity = source.model_dump(
+            by_alias=True,
+            exclude={
+                "markdown",
+                "chunks",
+                "compiler_version",
+                "chunking_version",
+            },
+        )
+        return ReaderSummaryResponse.model_validate(
+            {
+                **identity,
+                "status": "COMPLETED",
+                "points": points,
+                "coverage": [
+                    SummaryRange.model_validate({"startOffset": w.start, "endOffset": w.end})
+                    for w in windows
+                ],
+                "usedChunkIds": [chunk.chunk_id for chunk in source.chunks],
+                "usageContractVersion": 1,
+                "usageEvents": [event.model_dump(by_alias=True) for event in usage_events],
+            }
+        )

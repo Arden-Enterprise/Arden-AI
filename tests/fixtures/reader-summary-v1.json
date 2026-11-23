@@ -1,5 +1,7 @@
 {
   "contractVersion": 1,
+  "usageContractVersion": 1,
+  "usageEvents": [],
   "purpose": "READER_SUMMARY",
   "requestId": "10000000-0000-4000-8000-000000000007",
   "organizationId": "10000000-0000-4000-8000-000000000002",

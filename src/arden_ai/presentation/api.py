@@ -12,6 +12,7 @@ from pydantic import SecretStr
 from arden_ai import __version__
 from arden_ai.application import GenerationIndexer, PermissionAwareAnswerer
 from arden_ai.application.governed import GovernedAnswerer
+from arden_ai.application.maintenance import MaintenanceAnalyzer
 from arden_ai.application.reader_question import UnsupportedReaderQuestion
 from arden_ai.application.reader_sources import prepare_reader_source
 from arden_ai.application.reader_summary import ReaderSummarizer, UnsupportedSummary
@@ -27,6 +28,7 @@ from arden_ai.contracts.governed import (
     RetrievalRequest,
     RetrievalResponse,
 )
+from arden_ai.contracts.maintenance import MaintenanceAnalysisRequest, MaintenanceAnalysisResponse
 from arden_ai.contracts.reader import ReaderSourceRequest, ReaderSourceResponse
 from arden_ai.contracts.reader_summary import ReaderSummaryResponse
 from arden_ai.presentation.summary_failures import summary_failure
@@ -45,6 +47,8 @@ def create_api(
     governed_factory: Callable[[], GovernedAnswerer] | None = None,
     summaries: ReaderSummarizer | None = None,
     summaries_factory: Callable[[], ReaderSummarizer] | None = None,
+    maintenance_analyzer: MaintenanceAnalyzer | None = None,
+    maintenance_analyzer_factory: Callable[[], MaintenanceAnalyzer] | None = None,
 ) -> FastAPI:
     application = FastAPI(
         title="Arden AI",
@@ -55,6 +59,7 @@ def create_api(
     application.state.permission_aware_answerer = answerer
     application.state.governed_answerer = governed
     application.state.reader_summarizer = summaries
+    application.state.maintenance_analyzer = maintenance_analyzer
 
     def runtime_summaries() -> ReaderSummarizer:
         current: ReaderSummarizer | None = application.state.reader_summarizer
@@ -66,6 +71,20 @@ def create_api(
             except ValueError as error:
                 raise HTTPException(status_code=503, detail="Summary is unavailable") from error
             application.state.reader_summarizer = current
+        return current
+
+    def runtime_maintenance_analyzer() -> MaintenanceAnalyzer:
+        current: MaintenanceAnalyzer | None = application.state.maintenance_analyzer
+        if current is None:
+            if maintenance_analyzer_factory is None:
+                raise HTTPException(status_code=503, detail="Maintenance analysis is unavailable")
+            try:
+                current = maintenance_analyzer_factory()
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=503, detail="Maintenance analysis is unavailable"
+                ) from error
+            application.state.maintenance_analyzer = current
         return current
 
     def authorize_service(
@@ -100,8 +119,10 @@ def create_api(
         return current
 
     @application.post(
-        "/v1/reader-summaries", response_model=ReaderSummaryResponse,
-        dependencies=[Depends(authorize_service)], tags=["reader-v1"],
+        "/v1/reader-summaries",
+        response_model=ReaderSummaryResponse,
+        dependencies=[Depends(authorize_service)],
+        tags=["reader-v1"],
     )
     async def summarize_reader(
         request: ReaderSourceResponse,
@@ -114,11 +135,17 @@ def create_api(
             raise HTTPException(status_code=422, detail="Summary source is unsupported") from error
         except Exception as error:
             code = summary_failure(error)
-            logger.warning(json.dumps({
-                "event": "reader_summary_failed", "operationId": str(request.request_id),
-                "stage": "GENERATION", "code": code,
-                "durationMs": round((time.monotonic() - started) * 1_000),
-            }))
+            logger.warning(
+                json.dumps(
+                    {
+                        "event": "reader_summary_failed",
+                        "operationId": str(request.request_id),
+                        "stage": "GENERATION",
+                        "code": code,
+                        "durationMs": round((time.monotonic() - started) * 1_000),
+                    }
+                )
+            )
             raise HTTPException(status_code=502, detail={"code": code}) from None
 
     @application.post(
@@ -185,6 +212,26 @@ def create_api(
                 extra={"request_id": str(request.request_id), "error_type": type(error).__name__},
             )
             raise HTTPException(status_code=502, detail="Grounded generation failed") from error
+
+    @application.post(
+        "/v2/maintenance-analyses",
+        response_model=MaintenanceAnalysisResponse,
+        response_model_by_alias=True,
+        tags=["maintenance-v2"],
+        dependencies=[Depends(authorize_service)],
+    )
+    async def analyze_maintenance_case(
+        request: MaintenanceAnalysisRequest,
+        analyzer: Annotated[MaintenanceAnalyzer, Depends(runtime_maintenance_analyzer)],
+    ) -> MaintenanceAnalysisResponse:
+        try:
+            return await analyzer.analyze(request)
+        except Exception as error:
+            logger.warning(
+                "Maintenance analysis failed",
+                extra={"case_id": str(request.case_id), "error_type": type(error).__name__},
+            )
+            raise HTTPException(status_code=502, detail="Maintenance analysis failed") from None
 
     def runtime_indexer() -> GenerationIndexer:
         current: GenerationIndexer | None = application.state.generation_indexer
